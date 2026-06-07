@@ -32,23 +32,16 @@ interface UserProfile {
 const parseCustomOptions = (rawString: string): MenuOption[] => {
   if (!rawString || typeof rawString !== "string") return [];
   const options: MenuOption[] = [];
-
-  // 用分號拆分不同的大項，例如 [尺寸:小杯=0,大杯=10] [溫度:微冰=0]
   const groups = rawString.split(";");
   groups.forEach((group) => {
     const parts = group.split(":");
     if (parts.length < 2) return;
     const title = parts[0].trim();
     const choicesRaw = parts[1].split(",");
-
     const choices: OptionChoice[] = choicesRaw.map((c) => {
       const kv = c.split("=");
-      return {
-        label: kv[0].trim(),
-        price: kv[1] ? Number(kv[1].trim()) : 0,
-      };
+      return { label: kv[0].trim(), price: kv[1] ? Number(kv[1].trim()) : 0 };
     });
-
     options.push({
       title: title,
       type:
@@ -69,19 +62,21 @@ export default function App() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
+  // 🔧 專門用來顯示錯誤訊息的狀態
+  const [debugMsg, setDebugMsg] = useState<string>("");
+
   const [activeItem, setActiveItem] = useState<MenuItem | null>(null);
   const [selectedSingle, setSelectedSingle] = useState<{
     [key: string]: OptionChoice;
   }>({});
   const [selectedMulti, setSelectedMulti] = useState<OptionChoice[]>([]);
 
-  // ⚠️ 填入您的專屬網址與 ID
+  // 您的專屬鑰匙，我已經幫您填好了！
   const myLiffId = "2010313868-5aQ7LjIm";
   const scriptUrl =
     "https://script.google.com/macros/s/AKfycbyYWoLRqeJRFRvcgsRrDBsa_iXW97hrOXTVDbJ6G__98112r_xyu4u3-4zqMDZ1dj99/exec";
 
   useEffect(() => {
-    // 1. 初始化 LIFF
     liff
       .init({ liffId: myLiffId })
       .then(() => {
@@ -93,25 +88,36 @@ export default function App() {
       })
       .catch(console.error);
 
-    // 2. 從 Google 試算表動態獲取菜單
     fetch(scriptUrl)
       .then((res) => res.json())
       .then((data) => {
-        if (Array.isArray(data)) {
+        if (data.error) {
+          setDebugMsg("後台回報錯誤：" + data.error);
+        } else if (Array.isArray(data)) {
           const parsedMenu = data.map((item: any) => ({
             id: item.id,
-            category: item.category,
-            name: item.name,
-            price: item.price,
+            category: String(item.category).trim(), // 消除類別的多餘空白
+            name: String(item.name).trim(),
+            price: Number(item.price),
             desc: item.desc,
             options: parseCustomOptions(item.rawOptions),
           }));
           setMenuData(parsedMenu);
+
+          if (parsedMenu.length === 0) {
+            setDebugMsg(
+              "已成功連線到試算表，但沒有找到任何「上架」的品項，請檢查試算表第一欄是否精準輸入了「上架」兩字。"
+            );
+          }
+        } else {
+          setDebugMsg("資料格式異常，請確認 Apps Script 部署設定。");
         }
         setLoading(false);
       })
       .catch((err) => {
-        console.error("菜單載入失敗", err);
+        setDebugMsg(
+          "連線被瀏覽器阻擋 (可能是權限未開或網址錯誤)：" + err.toString()
+        );
         setLoading(false);
       });
   }, []);
@@ -139,7 +145,6 @@ export default function App() {
     if (!activeItem) return;
     let finalPrice = activeItem.price;
     const optionLabels: string[] = [];
-
     Object.values(selectedSingle).forEach((choice) => {
       finalPrice += choice.price;
       optionLabels.push(choice.label);
@@ -148,7 +153,6 @@ export default function App() {
       finalPrice += choice.price;
       optionLabels.push(choice.label);
     });
-
     const finalName =
       optionLabels.length > 0
         ? `${activeItem.name} (${optionLabels.join(", ")})`
@@ -173,7 +177,6 @@ export default function App() {
       paymentMethod: "現場付款",
       memo: "LINE LIFF 雲端點餐",
     };
-
     fetch(scriptUrl, { method: "POST", body: JSON.stringify(orderData) })
       .then(() => {
         alert("訂單已送出，吧台準備中！☕️");
@@ -232,12 +235,28 @@ export default function App() {
       </header>
 
       <main>
+        {/* 🔧 錯誤訊息會顯示在這裡 */}
+        {debugMsg && (
+          <div
+            style={{
+              padding: "16px",
+              backgroundColor: "#ffe6e6",
+              color: "#d9534f",
+              borderRadius: "8px",
+              marginBottom: "16px",
+              fontWeight: "bold",
+              border: "1px solid #d9534f",
+            }}
+          >
+            🔧 系統偵錯報告：{debugMsg}
+          </div>
+        )}
+
         {["茶飲", "咖啡", "小點", "餐食"].map((category) => {
           const categoryItems = menuData.filter(
             (item) => item.category === category
           );
           if (categoryItems.length === 0) return null;
-
           return (
             <div key={category} style={{ marginBottom: "24px" }}>
               <h2
@@ -382,7 +401,6 @@ export default function App() {
                       opt.type === "single"
                         ? isSingleSelected
                         : isMultiSelected;
-
                     return (
                       <button
                         key={choice.label}
