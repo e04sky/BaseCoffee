@@ -1,31 +1,45 @@
 import React, { useState, useEffect } from "react";
 import liff from "@line/liff";
-import "./styles.css"; // 確保你的 CodeSandbox 內有這個檔案
+import "./styles.css";
+
+// 1. 給 Q Grader 看的嚴格標籤：定義菜單與顧客的資料格式
+interface MenuItem {
+  id: string;
+  category: string;
+  name: string;
+  price: number;
+  desc: string;
+}
+
+interface UserProfile {
+  displayName: string;
+}
 
 export default function App() {
-  const [profile, setProfile] = useState(null);
-  const [cart, setCart] = useState([]);
+  // 告訴系統：profile 裡面會有 displayName，cart 是一個裝著 MenuItem 的陣列
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [cart, setCart] = useState<MenuItem[]>([]);
 
-  // 1. 初始化 LIFF
+  // 2. 初始化 LIFF
   useEffect(() => {
-    // ⚠️ 之後這裡要填入你在 LINE Developers 申請到的 LIFF ID
     const myLiffId = "2010313868-5aQ7LjIm";
 
     liff
       .init({ liffId: myLiffId })
       .then(() => {
         if (liff.isLoggedIn()) {
-          liff.getProfile().then((p) => setProfile(p));
+          liff.getProfile().then((p) => {
+            setProfile({ displayName: p.displayName });
+          });
         } else {
-          // 在本機開發時如果沒登入，暫不強制跳轉，方便看畫面
           console.log("未登入 LINE");
         }
       })
       .catch((err) => console.error("LIFF 初始化失敗", err));
   }, []);
 
-  // 2. 菜單資料庫 (四個核心分類)
-  const menuData = [
+  // 3. 菜單資料庫
+  const menuData: MenuItem[] = [
     {
       id: "C1",
       category: "咖啡",
@@ -56,14 +70,14 @@ export default function App() {
     },
   ];
 
-  // 3. 加入購物車邏輯
-  const addToCart = (item) => {
+  // 4. 加入購物車與計算邏輯
+  const addToCart = (item: MenuItem) => {
     setCart([...cart, item]);
   };
 
   const totalAmount = cart.reduce((sum, item) => sum + item.price, 0);
 
-  // 4. 結帳送單邏輯 (對接 Apps Script)
+  // 5. 結帳送單邏輯
   const handleCheckout = () => {
     if (cart.length === 0) return alert("購物車還是空的喔！");
 
@@ -77,11 +91,9 @@ export default function App() {
       memo: "LINE LIFF 點餐測試",
     };
 
-    // ⚠️ 這裡要換成你 Apps Script 剛才發布的「網頁應用程式 URL」
     const scriptUrl =
       "https://script.google.com/macros/s/AKfycbyYWoLRqeJRFRvcgsRrDBsa_iXW97hrOXTVDbJ6G__98112r_xyu4u3-4zqMDZ1dj99/exec";
 
-    // 傳送資料到 Google Sheet，然後透過 LINE 官方帳號通知
     fetch(scriptUrl, {
       method: "POST",
       body: JSON.stringify(orderData),
@@ -89,9 +101,9 @@ export default function App() {
       .then((response) => response.text())
       .then((result) => {
         alert("訂單已送出，吧台準備中！☕️");
-        setCart([]); // 清空購物車
+        setCart([]);
         if (liff.isInClient()) {
-          liff.closeWindow(); // 若在 LINE 內開啟，送單後自動關閉畫面
+          liff.closeWindow();
         }
       })
       .catch((error) => alert("傳送失敗，請稍後再試。"));
@@ -107,7 +119,6 @@ export default function App() {
         padding: "20px",
       }}
     >
-      {/* 頭部歡迎區塊 */}
       <header
         style={{
           marginBottom: "24px",
@@ -127,7 +138,6 @@ export default function App() {
         </p>
       </header>
 
-      {/* 菜單展示區 */}
       <main>
         {["茶飲", "咖啡", "小點", "餐食"].map((category) => (
           <div key={category} style={{ marginBottom: "24px" }}>
@@ -204,7 +214,6 @@ export default function App() {
         ))}
       </main>
 
-      {/* 懸浮購物車 */}
       {cart.length > 0 && (
         <div
           style={{
