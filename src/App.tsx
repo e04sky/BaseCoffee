@@ -33,7 +33,6 @@ const parseCustomOptions = (rawString: string): MenuOption[] => {
   if (!rawString || typeof rawString !== "string") return [];
   const options: MenuOption[] = [];
 
-  // 用分號拆分不同的大項，例如 [尺寸:小杯=0,大杯=10] [溫度:微冰=0]
   const groups = rawString.split(";");
   groups.forEach((group) => {
     const parts = group.split(":");
@@ -75,13 +74,12 @@ export default function App() {
   }>({});
   const [selectedMulti, setSelectedMulti] = useState<OptionChoice[]>([]);
 
-  // ⚠️ 填入您的專屬網址與 ID
+  // ⚠️ 這裡只要填入「網址」和「ID」就好！
   const myLiffId = "2010313868-5aQ7LjIm";
   const scriptUrl =
     "https://script.google.com/macros/s/AKfycbyYWoLRqeJRFRvcgsRrDBsa_iXW97hrOXTVDbJ6G__98112r_xyu4u3-4zqMDZ1dj99/exec";
 
   useEffect(() => {
-    // 1. 初始化 LIFF
     liff
       .init({ liffId: myLiffId })
       .then(() => {
@@ -93,7 +91,6 @@ export default function App() {
       })
       .catch(console.error);
 
-    // 2. 從 Google 試算表動態獲取菜單
     fetch(scriptUrl)
       .then((res) => res.json())
       .then((data) => {
