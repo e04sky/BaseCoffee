@@ -2,112 +2,204 @@ import React, { useState, useEffect } from "react";
 import liff from "@line/liff";
 import "./styles.css";
 
-// 1. 給 Q Grader 看的嚴格標籤：定義菜單與顧客的資料格式
+interface OptionChoice {
+  label: string;
+  price: number;
+}
+interface MenuOption {
+  title: string;
+  type: "single" | "multiple";
+  choices: OptionChoice[];
+}
 interface MenuItem {
   id: string;
   category: string;
   name: string;
   price: number;
   desc: string;
+  options?: MenuOption[];
 }
-
+interface CartItem {
+  cartId: string;
+  name: string;
+  price: number;
+}
 interface UserProfile {
   displayName: string;
 }
 
+// 解析雲端試算表文字字串的工具函式
+const parseCustomOptions = (rawString: string): MenuOption[] => {
+  if (!rawString || typeof rawString !== "string") return [];
+  const options: MenuOption[] = [];
+
+  // 用分號拆分不同的大項，例如 [尺寸:小杯=0,大杯=10] [溫度:微冰=0]
+  const groups = rawString.split(";");
+  groups.forEach((group) => {
+    const parts = group.split(":");
+    if (parts.length < 2) return;
+    const title = parts[0].trim();
+    const choicesRaw = parts[1].split(",");
+
+    const choices: OptionChoice[] = choicesRaw.map((c) => {
+      const kv = c.split("=");
+      return {
+        label: kv[0].trim(),
+        price: kv[1] ? Number(kv[1].trim()) : 0,
+      };
+    });
+
+    options.push({
+      title: title,
+      type:
+        title.includes("加購") ||
+        title.includes("升級") ||
+        title.includes("環保")
+          ? "multiple"
+          : "single",
+      choices: choices,
+    });
+  });
+  return options;
+};
+
 export default function App() {
-  // 告訴系統：profile 裡面會有 displayName，cart 是一個裝著 MenuItem 的陣列
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [cart, setCart] = useState<MenuItem[]>([]);
+  const [menuData, setMenuData] = useState<MenuItem[]>([]);
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
 
-  // 2. 初始化 LIFF
+  const [activeItem, setActiveItem] = useState<MenuItem | null>(null);
+  const [selectedSingle, setSelectedSingle] = useState<{
+    [key: string]: OptionChoice;
+  }>({});
+  const [selectedMulti, setSelectedMulti] = useState<OptionChoice[]>([]);
+
+  // ⚠️ 填入您的專屬網址與 ID
+  const myLiffId = "2010313868-5aQ7LjIm";
+  const scriptUrl =
+    "https://script.google.com/macros/s/AKfycbyYWoLRqeJRFRvcgsRrDBsa_iXW97hrOXTVDbJ6G__98112r_xyu4u3-4zqMDZ1dj99/exec";
+
   useEffect(() => {
-    const myLiffId = "2010313868-5aQ7LjIm";
-
+    // 1. 初始化 LIFF
     liff
       .init({ liffId: myLiffId })
       .then(() => {
         if (liff.isLoggedIn()) {
-          liff.getProfile().then((p) => {
-            setProfile({ displayName: p.displayName });
-          });
-        } else {
-          console.log("未登入 LINE");
+          liff
+            .getProfile()
+            .then((p) => setProfile({ displayName: p.displayName }));
         }
       })
-      .catch((err) => console.error("LIFF 初始化失敗", err));
+      .catch(console.error);
+
+    // 2. 從 Google 試算表動態獲取菜單
+    fetch(scriptUrl)
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          const parsedMenu = data.map((item: any) => ({
+            id: item.id,
+            category: item.category,
+            name: item.name,
+            price: item.price,
+            desc: item.desc,
+            options: parseCustomOptions(item.rawOptions),
+          }));
+          setMenuData(parsedMenu);
+        }
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("菜單載入失敗", err);
+        setLoading(false);
+      });
   }, []);
 
-  // 3. 菜單資料庫
-  const menuData: MenuItem[] = [
-    {
-      id: "C1",
-      category: "咖啡",
-      name: "基地經典冰拿鐵",
-      price: 80,
-      desc: "底子好，隨便沖都好喝",
-    },
-    {
-      id: "T1",
-      category: "茶飲",
-      name: "在地小農高山青",
-      price: 40,
-      desc: "順口回甘，解渴首選",
-    },
-    {
-      id: "S1",
-      category: "小點",
-      name: "手工焦糖烤布丁",
-      price: 60,
-      desc: "綿密滑順的日常療癒",
-    },
-    {
-      id: "M1",
-      category: "餐食",
-      name: "舒肥雞胸義大利麵",
-      price: 150,
-      desc: "高蛋白無添加，健康飽足",
-    },
-  ];
+  const handleAddClick = (item: MenuItem) => {
+    if (item.options && item.options.length > 0) {
+      setActiveItem(item);
+      const initialSingle: { [key: string]: OptionChoice } = {};
+      item.options
+        .filter((opt) => opt.type === "single")
+        .forEach((opt) => {
+          initialSingle[opt.title] = opt.choices[0];
+        });
+      setSelectedSingle(initialSingle);
+      setSelectedMulti([]);
+    } else {
+      setCart([
+        ...cart,
+        { cartId: Date.now().toString(), name: item.name, price: item.price },
+      ]);
+    }
+  };
 
-  // 4. 加入購物車與計算邏輯
-  const addToCart = (item: MenuItem) => {
-    setCart([...cart, item]);
+  const confirmCustomization = () => {
+    if (!activeItem) return;
+    let finalPrice = activeItem.price;
+    const optionLabels: string[] = [];
+
+    Object.values(selectedSingle).forEach((choice) => {
+      finalPrice += choice.price;
+      optionLabels.push(choice.label);
+    });
+    selectedMulti.forEach((choice) => {
+      finalPrice += choice.price;
+      optionLabels.push(choice.label);
+    });
+
+    const finalName =
+      optionLabels.length > 0
+        ? `${activeItem.name} (${optionLabels.join(", ")})`
+        : activeItem.name;
+    setCart([
+      ...cart,
+      { cartId: Date.now().toString(), name: finalName, price: finalPrice },
+    ]);
+    setActiveItem(null);
   };
 
   const totalAmount = cart.reduce((sum, item) => sum + item.price, 0);
 
-  // 5. 結帳送單邏輯
   const handleCheckout = () => {
     if (cart.length === 0) return alert("購物車還是空的喔！");
-
     const orderData = {
       orderId: `ORD-${Date.now().toString().slice(-6)}`,
       orderTime: new Date().toLocaleString("zh-TW"),
       customerName: profile ? profile.displayName : "吧台熟客",
-      items: cart.map((c) => c.name).join(", "),
+      items: cart.map((c) => c.name).join("\n"),
       totalAmount: totalAmount,
       paymentMethod: "現場付款",
-      memo: "LINE LIFF 點餐測試",
+      memo: "LINE LIFF 雲端點餐",
     };
 
-    const scriptUrl =
-      "https://script.google.com/macros/s/AKfycbyYWoLRqeJRFRvcgsRrDBsa_iXW97hrOXTVDbJ6G__98112r_xyu4u3-4zqMDZ1dj99/exec";
-
-    fetch(scriptUrl, {
-      method: "POST",
-      body: JSON.stringify(orderData),
-    })
-      .then((response) => response.text())
-      .then((result) => {
+    fetch(scriptUrl, { method: "POST", body: JSON.stringify(orderData) })
+      .then(() => {
         alert("訂單已送出，吧台準備中！☕️");
         setCart([]);
-        if (liff.isInClient()) {
-          liff.closeWindow();
-        }
+        if (liff.isInClient()) liff.closeWindow();
       })
-      .catch((error) => alert("傳送失敗，請稍後再試。"));
+      .catch(() => alert("傳送失敗，請稍後再試。"));
   };
+
+  if (loading) {
+    return (
+      <div
+        style={{
+          backgroundColor: "#EDE6D4",
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "#1A2F42",
+          fontWeight: "bold",
+        }}
+      >
+        研磨風味中，請稍候...☕️
+      </div>
+    );
+  }
 
   return (
     <div
@@ -117,6 +209,7 @@ export default function App() {
         color: "#1A2F42",
         fontFamily: "sans-serif",
         padding: "20px",
+        paddingBottom: "100px",
       }}
     >
       <header
@@ -134,26 +227,30 @@ export default function App() {
         <p style={{ margin: 0, fontSize: "14px", color: "#604E3F" }}>
           {profile
             ? `歡迎回來，${profile.displayName}`
-            : "國際標準的風味，日常實惠的享受"}
+            : "國際標準的風味科學，實惠的日常享受"}
         </p>
       </header>
 
       <main>
-        {["茶飲", "咖啡", "小點", "餐食"].map((category) => (
-          <div key={category} style={{ marginBottom: "24px" }}>
-            <h2
-              style={{
-                fontSize: "18px",
-                borderLeft: "4px solid #1A2F42",
-                paddingLeft: "8px",
-                marginBottom: "12px",
-              }}
-            >
-              {category}
-            </h2>
-            {menuData
-              .filter((item) => item.category === category)
-              .map((item) => (
+        {["茶飲", "咖啡", "小點", "餐食"].map((category) => {
+          const categoryItems = menuData.filter(
+            (item) => item.category === category
+          );
+          if (categoryItems.length === 0) return null;
+
+          return (
+            <div key={category} style={{ marginBottom: "24px" }}>
+              <h2
+                style={{
+                  fontSize: "18px",
+                  borderLeft: "4px solid #1A2F42",
+                  paddingLeft: "8px",
+                  marginBottom: "12px",
+                }}
+              >
+                {category}
+              </h2>
+              {categoryItems.map((item) => (
                 <div
                   key={item.id}
                   style={{
@@ -167,7 +264,7 @@ export default function App() {
                     boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
                   }}
                 >
-                  <div>
+                  <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: "bold", fontSize: "16px" }}>
                       {item.name}
                     </div>
@@ -176,6 +273,7 @@ export default function App() {
                         fontSize: "12px",
                         color: "#604E3F",
                         marginTop: "4px",
+                        paddingRight: "10px",
                       }}
                     >
                       {item.desc}
@@ -190,7 +288,7 @@ export default function App() {
                   >
                     <span style={{ fontWeight: "bold" }}>${item.price}</span>
                     <button
-                      onClick={() => addToCart(item)}
+                      onClick={() => handleAddClick(item)}
                       style={{
                         backgroundColor: "#659157",
                         color: "white",
@@ -200,9 +298,6 @@ export default function App() {
                         height: "28px",
                         fontSize: "18px",
                         cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
                       }}
                     >
                       +
@@ -210,10 +305,149 @@ export default function App() {
                   </div>
                 </div>
               ))}
-          </div>
-        ))}
+            </div>
+          );
+        })}
       </main>
 
+      {/* 客製化彈窗 */}
+      {activeItem && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(26,47,66,0.6)",
+            display: "flex",
+            alignItems: "flex-end",
+            zIndex: 10,
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: "#EDE6D4",
+              width: "100%",
+              padding: "24px",
+              borderTopLeftRadius: "16px",
+              borderTopRightRadius: "16px",
+              boxShadow: "0 -4px 12px rgba(0,0,0,0.1)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "16px",
+                borderBottom: "1px solid #604E3F",
+                paddingBottom: "8px",
+              }}
+            >
+              <h3 style={{ margin: 0, fontSize: "18px" }}>{activeItem.name}</h3>
+              <button
+                onClick={() => setActiveItem(null)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  fontSize: "20px",
+                  cursor: "pointer",
+                  color: "#604E3F",
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {activeItem.options?.map((opt) => (
+              <div key={opt.title} style={{ marginBottom: "16px" }}>
+                <div
+                  style={{
+                    fontWeight: "bold",
+                    marginBottom: "8px",
+                    color: "#1A2F42",
+                  }}
+                >
+                  {opt.title}
+                </div>
+                <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                  {opt.choices.map((choice) => {
+                    const isSingleSelected =
+                      selectedSingle[opt.title]?.label === choice.label;
+                    const isMultiSelected = selectedMulti.some(
+                      (c) => c.label === choice.label
+                    );
+                    const isSelected =
+                      opt.type === "single"
+                        ? isSingleSelected
+                        : isMultiSelected;
+
+                    return (
+                      <button
+                        key={choice.label}
+                        onClick={() => {
+                          if (opt.type === "single") {
+                            setSelectedSingle({
+                              ...selectedSingle,
+                              [opt.title]: choice,
+                            });
+                          } else {
+                            if (isMultiSelected) {
+                              setSelectedMulti(
+                                selectedMulti.filter(
+                                  (c) => c.label !== choice.label
+                                )
+                              );
+                            } else {
+                              setSelectedMulti([...selectedMulti, choice]);
+                            }
+                          }
+                        }}
+                        style={{
+                          padding: "8px 16px",
+                          borderRadius: "20px",
+                          border: `1px solid ${
+                            isSelected ? "#659157" : "#604E3F"
+                          }`,
+                          backgroundColor: isSelected
+                            ? "#659157"
+                            : "transparent",
+                          color: isSelected ? "white" : "#1A2F42",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {choice.label}{" "}
+                        {choice.price !== 0
+                          ? `(${choice.price > 0 ? "+" : ""}${choice.price})`
+                          : ""}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+            <button
+              onClick={confirmCustomization}
+              style={{
+                width: "100%",
+                padding: "12px",
+                marginTop: "12px",
+                backgroundColor: "#1A2F42",
+                color: "#EDE6D4",
+                border: "none",
+                borderRadius: "8px",
+                fontWeight: "bold",
+                fontSize: "16px",
+              }}
+            >
+              確認加入購物車
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 懸浮購物車 */}
       {cart.length > 0 && (
         <div
           style={{
@@ -226,11 +460,10 @@ export default function App() {
             padding: "16px 20px",
             display: "flex",
             justifyContent: "space-between",
-            alignItems: "center",
-            boxShadow: "0 -2px 10px rgba(0,0,0,0.1)",
+            zIndex: 5,
           }}
         >
-          <div>已選擇 {cart.length} 項商品</div>
+          <div>已選擇 {cart.length} 項</div>
           <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
             <span style={{ fontWeight: "bold", fontSize: "18px" }}>
               總計 ${totalAmount}
@@ -244,7 +477,6 @@ export default function App() {
                 padding: "8px 16px",
                 fontWeight: "bold",
                 borderRadius: "4px",
-                cursor: "pointer",
               }}
             >
               結帳
