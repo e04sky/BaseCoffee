@@ -71,7 +71,7 @@ export default function App() {
   }>({});
   const [selectedMulti, setSelectedMulti] = useState<OptionChoice[]>([]);
 
-  // 您的專屬鑰匙，我已經幫您填好了！
+  // 您的專屬鑰匙，已為您精準填入
   const myLiffId = "2010313868-5aQ7LjIm";
   const scriptUrl =
     "https://script.google.com/macros/s/AKfycbyYWoLRqeJRFRvcgsRrDBsa_iXW97hrOXTVDbJ6G__98112r_xyu4u3-4zqMDZ1dj99/exec";
@@ -80,44 +80,51 @@ export default function App() {
     liff
       .init({ liffId: myLiffId })
       .then(() => {
-        if (liff.isLoggedIn()) {
-          liff
-            .getProfile()
-            .then((p) => setProfile({ displayName: p.displayName }));
+        // 🛡️ 核心防線：如果未登入 LINE，強制跳轉驗證頁面
+        if (!liff.isLoggedIn()) {
+          liff.login();
+          return; // 擋下未授權者，停止後續任何動作
         }
-      })
-      .catch(console.error);
 
-    fetch(scriptUrl)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.error) {
-          setDebugMsg("後台回報錯誤：" + data.error);
-        } else if (Array.isArray(data)) {
-          const parsedMenu = data.map((item: any) => ({
-            id: item.id,
-            category: String(item.category).trim(), // 消除類別的多餘空白
-            name: String(item.name).trim(),
-            price: Number(item.price),
-            desc: item.desc,
-            options: parseCustomOptions(item.rawOptions),
-          }));
-          setMenuData(parsedMenu);
+        // 確定是真實客人後，取得真實名字並去試算表端出菜單
+        liff
+          .getProfile()
+          .then((p) => setProfile({ displayName: p.displayName }));
 
-          if (parsedMenu.length === 0) {
-            setDebugMsg(
-              "已成功連線到試算表，但沒有找到任何「上架」的品項，請檢查試算表第一欄是否精準輸入了「上架」兩字。"
-            );
-          }
-        } else {
-          setDebugMsg("資料格式異常，請確認 Apps Script 部署設定。");
-        }
-        setLoading(false);
+        fetch(scriptUrl)
+          .then((res) => res.json())
+          .then((data) => {
+            if (data.error) {
+              setDebugMsg("後台回報錯誤：" + data.error);
+            } else if (Array.isArray(data)) {
+              const parsedMenu = data.map((item: any) => ({
+                id: item.id,
+                category: String(item.category).trim(),
+                name: String(item.name).trim(),
+                price: Number(item.price),
+                desc: item.desc,
+                options: parseCustomOptions(item.rawOptions),
+              }));
+              setMenuData(parsedMenu);
+
+              if (parsedMenu.length === 0) {
+                setDebugMsg(
+                  "已成功連線，但沒有找到「上架」品項，請檢查試算表。"
+                );
+              }
+            } else {
+              setDebugMsg("資料格式異常，請確認 Apps Script 部署設定。");
+            }
+            setLoading(false);
+          })
+          .catch((err) => {
+            setDebugMsg("連線被阻擋：" + err.toString());
+            setLoading(false);
+          });
       })
       .catch((err) => {
-        setDebugMsg(
-          "連線被瀏覽器阻擋 (可能是權限未開或網址錯誤)：" + err.toString()
-        );
+        console.error(err);
+        setDebugMsg("LIFF 初始化失敗");
         setLoading(false);
       });
   }, []);
